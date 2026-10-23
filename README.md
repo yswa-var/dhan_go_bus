@@ -1,3 +1,6 @@
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9ef0a8dc-01ab-46df-bf62-561c639be4d5" />
+
+
 Go market engine for Dhan live data.
 
 It reads the Dhan feed and sends market events through Go channels. From that it builds:
