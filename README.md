@@ -14,7 +14,7 @@ It reads the Dhan feed and sends market events through Go channels. From that it
 
 ## Desktop terminal
 
-Quest 007 adds a native macOS desktop app using Fyne.
+Quest 007 adds a native macOS desktop app using [Fyne](https://fyne.io/), [Apptrix WebView](https://addons.fyne.io/addons/org.apptrix.components.webview/), [Apache ECharts](https://echarts.apache.org/). 
 
 The window has a watchlist, ECharts candle chart with EMA20, and order book table. Chart files are bundled in the app, so no frontend server is needed. A tiny local bridge gives chart state to the WebView every 250 ms.
 
