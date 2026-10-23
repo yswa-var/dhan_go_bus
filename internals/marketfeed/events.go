@@ -58,6 +58,7 @@ type Depth struct {
 	ExchangeSegment string
 	SecurityID      string
 	Symbol          string
+	Timestamp       time.Time
 	LTP             float32
 	Levels          []DepthLevel
 }

@@ -6,13 +6,19 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"yswa-var/dhan_go_bus/internals"
 	"yswa-var/dhan_go_bus/internals/bus"
 	"yswa-var/dhan_go_bus/internals/dhan_ops"
+	"yswa-var/dhan_go_bus/internals/ema"
 	"yswa-var/dhan_go_bus/internals/marketfeed"
+	"yswa-var/dhan_go_bus/internals/ohlc"
+	"yswa-var/dhan_go_bus/internals/orderbook"
+	"yswa-var/dhan_go_bus/internals/pipeline"
+	"yswa-var/dhan_go_bus/internals/storage"
 )
 
 func main() {
@@ -24,11 +30,6 @@ func main() {
 		log.Fatalf("resolved %d instruments, want 48", len(contracts))
 	}
 
-	eventBus := bus.NewBroadcastBus[marketfeed.MarketEvent]()
-	defer eventBus.Close()
-	subscriberID, events := eventBus.Subscribe(256)
-	go printMetrics(eventBus, subscriberID, events)
-
 	config, err := internals.NewConfig()
 	if err != nil {
 		log.Fatal(err)
@@ -38,6 +39,62 @@ func main() {
 		log.Fatal(err)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	postgres, err := storage.NewPostgresWriter(ctx, config.DatabaseURL())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer postgres.Close()
+	if err := postgres.EnsureSchema(ctx); err != nil {
+		log.Fatal(err)
+	}
+
+	eventBus := bus.NewBroadcastBus[marketfeed.MarketEvent]()
+	defer eventBus.Close()
+	metricsID, metricsEvents := eventBus.Subscribe(256)
+	go printMetrics(eventBus, metricsID, metricsEvents)
+	_, ohlcEvents := eventBus.Subscribe(256)
+	bookEngine := orderbook.NewOrderBookEngine()
+	_, depthEvents := eventBus.Subscribe(256)
+	candleBus := bus.NewBroadcastBus[ohlc.Candle]()
+	defer candleBus.Close()
+	_, writerEvents := candleBus.Subscribe(storage.QueueCapacity)
+	_, emaEvents := candleBus.Subscribe(256)
+
+	emaEngine := ema.NewEMA20Engine()
+	emaInstruments, err := emaInstruments(contracts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := emaEngine.Recover(ctx, postgres, emaInstruments); err != nil {
+		log.Fatal(err)
+	}
+
+	aggregator := ohlc.NewMinuteAggregator()
+	candlePipeline, err := pipeline.NewCandlePipelineWithPublisher(ohlcEvents, aggregator, candleBus.Publish)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	pipelineContext, cancelPipeline := context.WithCancel(context.Background())
+	defer cancelPipeline()
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- storage.NewBatchWriter(writerEvents, postgres).Run(pipelineContext)
+	}()
+	emaDone := make(chan error, 1)
+	go func() {
+		emaDone <- runEMA(pipelineContext, emaEvents, emaEngine)
+	}()
+	bookDone := make(chan error, 1)
+	go func() {
+		bookDone <- runOrderBook(pipelineContext, depthEvents, bookEngine)
+	}()
+	pipelineDone := make(chan error, 1)
+	go func() {
+		pipelineDone <- candlePipeline.Run(pipelineContext)
+	}()
 	client, err := marketfeed.NewClient(marketfeed.ClientConfig{
 		ClientID:    config.ClientID(),
 		AccessToken: token,
@@ -48,6 +105,7 @@ func main() {
 			fmt.Printf("[SUBSCRIBED] %d instruments\n", count)
 		},
 		OnError: func(err error) {
+			bookEngine.MarkAllStale()
 			log.Printf("[RECONNECT] %v", err)
 		},
 	})
@@ -64,10 +122,82 @@ func main() {
 		})
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := client.RunWithBus(ctx, subscriptions, eventBus); err != nil {
-		log.Fatal(err)
+	clientErr := client.RunWithBus(ctx, subscriptions, eventBus)
+	eventBus.Close()
+	if err := <-bookDone; err != nil {
+		log.Printf("order-book engine stopped: %v", err)
+	}
+	shutdownTimer := time.AfterFunc(10*time.Second, cancelPipeline)
+	if err := <-pipelineDone; err != nil {
+		log.Printf("candle pipeline stopped: %v", err)
+	}
+	candleBus.Close()
+	if err := <-writerDone; err != nil {
+		log.Printf("candle writer stopped: %v", err)
+	}
+	if err := <-emaDone; err != nil {
+		log.Printf("EMA engine stopped: %v", err)
+	}
+	shutdownTimer.Stop()
+	if clientErr != nil {
+		log.Fatal(clientErr)
+	}
+	if ctx.Err() != nil {
+		return
+	}
+}
+
+func runOrderBook(ctx context.Context, events <-chan marketfeed.MarketEvent, engine *orderbook.Engine) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-events:
+			if !ok {
+				return nil
+			}
+			depth, ok := event.(marketfeed.Depth)
+			if !ok {
+				continue
+			}
+			if _, err := engine.OnDepth(depth); err != nil {
+				// A malformed or stale packet must not stop updates for the
+				// other subscribed instruments.
+				log.Printf("[ORDER BOOK] security=%s: %v", depth.SecurityID, err)
+			}
+		}
+	}
+}
+
+func emaInstruments(contracts []dhan_ops.Contract) ([]ema.Instrument, error) {
+	instruments := make([]ema.Instrument, 0, len(contracts))
+	for _, contract := range contracts {
+		securityID, err := strconv.ParseInt(contract.SecurityID, 10, 64)
+		if err != nil || securityID <= 0 {
+			return nil, fmt.Errorf("invalid security ID %q for EMA recovery", contract.SecurityID)
+		}
+		instruments = append(instruments, ema.Instrument{
+			SecurityID:      securityID,
+			ExchangeSegment: contract.ExchangeSegment,
+			Interval:        time.Minute,
+		})
+	}
+	return instruments, nil
+}
+
+func runEMA(ctx context.Context, events <-chan ohlc.Candle, engine *ema.Engine) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case candle, ok := <-events:
+			if !ok {
+				return nil
+			}
+			if _, _, err := engine.OnCandle(candle); err != nil {
+				return err
+			}
+		}
 	}
 }
 

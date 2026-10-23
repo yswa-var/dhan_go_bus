@@ -25,11 +25,12 @@ const (
 )
 
 type Config struct {
-	clientID string
-	totpKey  string
-	dpin     string
-	http     *http.Client
-	authPath string
+	clientID    string
+	totpKey     string
+	dpin        string
+	databaseURL string
+	http        *http.Client
+	authPath    string
 }
 
 type auth struct {
@@ -49,11 +50,12 @@ func NewConfig() (*Config, error) {
 	}
 
 	config := &Config{
-		clientID: env["CLIENT_ID"],
-		totpKey:  env["TOTP_KEY"],
-		dpin:     env["DPIN"],
-		http:     http.DefaultClient,
-		authPath: filepath.Join(root, authFileName),
+		clientID:    env["CLIENT_ID"],
+		totpKey:     env["TOTP_KEY"],
+		dpin:        env["DPIN"],
+		databaseURL: env["DATABASE_URL"],
+		http:        http.DefaultClient,
+		authPath:    filepath.Join(root, authFileName),
 	}
 	if config.clientID == "" || config.totpKey == "" || config.dpin == "" {
 		return nil, errors.New(".env must contain CLIENT_ID, TOTP_KEY, and DPIN")
@@ -70,6 +72,11 @@ func (c *Config) GetAuthToken() (string, error) {
 // ClientID returns the Dhan client identifier used by authenticated APIs.
 func (c *Config) ClientID() string {
 	return c.clientID
+}
+
+// DatabaseURL returns the PostgreSQL connection string used by Quest 004.
+func (c *Config) DatabaseURL() string {
+	return c.databaseURL
 }
 
 func (c *Config) getAuthToken() (string, error) {

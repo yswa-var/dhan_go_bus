@@ -68,6 +68,9 @@ func TestDecodeFullPacket(t *testing.T) {
 	if !ok || len(depth.Levels) != 5 || depth.Levels[0].BidQuantity != 1 || depth.Levels[4].AskQuantity != 15 {
 		t.Fatalf("depth = %#v", events[2])
 	}
+	if !depth.Timestamp.Equal(time.Unix(1_792_755_000, 0).UTC()) {
+		t.Fatalf("depth timestamp = %v", depth.Timestamp)
+	}
 }
 
 func TestDecodeConcatenatedPackets(t *testing.T) {

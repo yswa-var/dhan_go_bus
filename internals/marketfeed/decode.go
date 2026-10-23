@@ -138,6 +138,7 @@ func decodeFull(packet []byte, metadata instrument) ([]Event, error) {
 		ExchangeSegment: metadata.ExchangeSegment,
 		SecurityID:      metadata.SecurityID,
 		Symbol:          metadata.Symbol,
+		Timestamp:       timestamp,
 		LTP:             ltp,
 		Levels:          make([]DepthLevel, depthLevelCount),
 	}
