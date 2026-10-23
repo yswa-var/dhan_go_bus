@@ -1,4 +1,5 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9ef0a8dc-01ab-46df-bf62-561c639be4d5" />
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/88725aad-b2d0-43ec-8988-e058eddfd8ef" />
 
 
 Go market engine for Dhan live data.
