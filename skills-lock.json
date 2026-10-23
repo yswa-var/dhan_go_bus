@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "dhanhq": {
+      "source": "dhan-oss/dhanhq-skills",
+      "sourceType": "github",
+      "skillPath": "skills/dhanhq/SKILL.md",
+      "computedHash": "d07f03541cabaca2fba2dd882895d7e6dc90c009b563216a930e0a71080e1992"
+    }
+  }
+}
