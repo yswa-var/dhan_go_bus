@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"yswa-var/dhan_go_bus/internals/bus"
 )
 
 const (
@@ -95,11 +97,28 @@ func NewClient(config ClientConfig) (*Client, error) {
 // Run connects, reads binary packets, and reconnects until ctx is cancelled.
 // The callback is invoked by this single reader loop, so event order is stable.
 func (c *Client) Run(ctx context.Context, subscriptions []Subscription, onEvent func(Event)) error {
-	if err := validateSubscriptions(subscriptions); err != nil {
-		return err
-	}
 	if onEvent == nil {
 		return errors.New("market feed event handler is required")
+	}
+	return c.run(ctx, subscriptions, func(_ context.Context, event MarketEvent) error {
+		onEvent(event)
+		return nil
+	})
+}
+
+// RunWithBus connects the market-feed reader to a broadcast bus. Publish is
+// context-aware, so a cancelled Run can wake a publisher blocked by a full
+// subscriber queue.
+func (c *Client) RunWithBus(ctx context.Context, subscriptions []Subscription, eventBus bus.BroadcastBus[MarketEvent]) error {
+	if eventBus == nil {
+		return errors.New("market feed broadcast bus is required")
+	}
+	return c.run(ctx, subscriptions, eventBus.Publish)
+}
+
+func (c *Client) run(ctx context.Context, subscriptions []Subscription, publish func(context.Context, MarketEvent) error) error {
+	if err := validateSubscriptions(subscriptions); err != nil {
+		return err
 	}
 
 	delay := c.config.ReconnectMin
@@ -111,7 +130,7 @@ func (c *Client) Run(ctx context.Context, subscriptions []Subscription, onEvent 
 		conn, err := c.connect(ctx, subscriptions)
 		if err == nil {
 			delay = c.config.ReconnectMin
-			err = readConnection(ctx, conn, subscriptions, onEvent)
+			err = readConnection(ctx, conn, subscriptions, publish)
 			_ = conn.Close()
 			if ctx.Err() != nil {
 				return nil
@@ -219,7 +238,7 @@ func validateSubscriptions(subscriptions []Subscription) error {
 	return nil
 }
 
-func readConnection(ctx context.Context, conn connection, subscriptions []Subscription, onEvent func(Event)) error {
+func readConnection(ctx context.Context, conn connection, subscriptions []Subscription, publish func(context.Context, MarketEvent) error) error {
 	lookup := makeInstrumentLookup(subscriptions)
 	closed := make(chan struct{})
 	defer close(closed)
@@ -252,7 +271,9 @@ func readConnection(ctx context.Context, conn connection, subscriptions []Subscr
 			return err
 		}
 		for _, event := range events {
-			onEvent(event)
+			if err := publish(ctx, event); err != nil {
+				return err
+			}
 		}
 	}
 }

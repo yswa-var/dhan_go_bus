@@ -2,8 +2,11 @@ package marketfeed
 
 import "time"
 
-// Event is implemented by all decoded market-feed events.
-type Event interface{ isMarketEvent() }
+// MarketEvent is implemented by all decoded market-feed events.
+type MarketEvent interface{ isMarketEvent() }
+
+// Event is kept as an alias for callers of the original marketfeed API.
+type Event = MarketEvent
 
 // Tick contains the latest traded price. Full packets also populate Volume
 // and OpenInterest so a consumer can log one compact market update.
