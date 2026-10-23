@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -42,6 +43,14 @@ type ClientConfig struct {
 	// Dialer is injectable so packet and reconnect behavior can be tested
 	// without opening a real Dhan connection.
 	Dialer *websocket.Dialer
+}
+
+// connection is the small subset of websocket behavior needed by the reader.
+// Keeping it private makes the production API simple while allowing focused tests.
+type connection interface {
+	ReadMessage() (messageType int, data []byte, err error)
+	WriteJSON(value any) error
+	Close() error
 }
 
 // Client maintains one Dhan market-feed connection at a time.
@@ -107,6 +116,9 @@ func (c *Client) Run(ctx context.Context, subscriptions []Subscription, onEvent 
 			if ctx.Err() != nil {
 				return nil
 			}
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 
 		if c.config.OnError != nil {
@@ -191,6 +203,12 @@ func validateSubscriptions(subscriptions []Subscription) error {
 	for _, subscription := range subscriptions {
 		if subscription.ExchangeSegment == "" || subscription.SecurityID == "" {
 			return errors.New("market-feed subscriptions need an exchange segment and security ID")
+		}
+		if exchangeCode(subscription.ExchangeSegment) == 255 {
+			return fmt.Errorf("unsupported Dhan exchange segment %q", subscription.ExchangeSegment)
+		}
+		if _, err := strconv.ParseUint(subscription.SecurityID, 10, 32); err != nil {
+			return fmt.Errorf("invalid market-feed security ID %q: %w", subscription.SecurityID, err)
 		}
 		key := subscription.ExchangeSegment + ":" + subscription.SecurityID
 		if _, exists := seen[key]; exists {
