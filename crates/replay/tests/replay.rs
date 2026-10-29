@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use goldlab_market_core::{
+    GoldMarketState, MarketStateConfig, SourcePartition, load_resolved_contracts,
+};
 use goldlab_recorder::record::{SourceCoordinate, SourceRecord};
 use goldlab_recorder::storage::Storage;
 use goldlab_replay::{ORDERING_POLICY, RecordingReader, ReplayEngine, ReplaySpeed};
@@ -178,5 +181,49 @@ fn unmanifested_parquet_file_is_rejected() -> Result<()> {
         .err()
         .context("unmanifested Parquet must fail")?;
     assert!(error.to_string().contains("unmanifested or missing"));
+    Ok(())
+}
+
+#[test]
+fn identical_replay_produces_identical_market_view_sequence() -> Result<()> {
+    let directory = TempDir::new()?;
+    write_fixture(&directory, fixture_records()?)?;
+    let contracts = std::fs::File::open(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("resolved-contracts-20261029T100331Z.csv"),
+    )?;
+    let wanted = ["581902", "582003", "495213"];
+    let instruments = load_resolved_contracts(contracts)?
+        .into_iter()
+        .filter(|instrument| wanted.contains(&instrument.security_id.as_str()))
+        .collect::<Vec<_>>();
+    let config = MarketStateConfig {
+        group_id: "GOLD-fixture".to_owned(),
+        stale_after_ns: 1_000_000_000,
+        instruments,
+        sources: vec![SourcePartition {
+            topic: "dhan.market.raw".to_owned(),
+            partition: 0,
+        }],
+    };
+
+    let run = |config: MarketStateConfig| -> Result<Vec<Vec<u8>>> {
+        let mut state = GoldMarketState::new(config)?;
+        let mut views = Vec::new();
+        RecordingReader::open(directory.path(), 1)?.visit(|event| {
+            views.push(serde_json::to_vec(state.apply(&event)?.as_ref())?);
+            Ok(())
+        })?;
+        Ok(views)
+    };
+    let first = run(config.clone())?;
+    let second = run(config)?;
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 3);
+    let final_view: serde_json::Value = serde_json::from_slice(&first[2])?;
+    assert_eq!(final_view["sequence"], 3);
+    assert_eq!(final_view["complete"], true);
     Ok(())
 }

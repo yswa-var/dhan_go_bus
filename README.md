@@ -6,8 +6,8 @@ contracts, subscribes in full-feed mode, and publishes raw packets to
 Redpanda. The Rust recorder consumes those records into durable,
 Zstandard-compressed Parquet.
 
-This repository does **not** place orders. Q002 ends at deterministic replay of
-auditable market-data recordings.
+This repository does **not** place orders. Q003 ends at coherent, immutable
+GOLD-family market views produced from canonical live/replay events.
 
 ```mermaid
 flowchart LR
@@ -18,6 +18,7 @@ flowchart LR
     P --> F[(Parquet + manifest)]
     F --> Q[DuckDB inspection]
     F --> H[Rust deterministic replay]
+    H --> S[Single-owner GOLD market state]
 ```
 
 ## What counts as proof
@@ -102,6 +103,27 @@ printed `checksum_sha256` must match. The replay fails on checksum corruption,
 unmanifested files, duplicate offsets, or decreasing offsets; source gaps are
 counted and reported. See [the Q002 replay guide](docs/q002-replay.md) for the
 visual proof procedure, wall-clock mode, ordering policy, and limitations.
+
+## Build and inspect a GOLD market view
+
+Use the resolved-contract cache from the same session and choose the freshness
+threshold explicitly:
+
+```sh
+cargo run -p goldlab-replay --bin goldlab-market-state --release -- \
+  --input "${GOLDLAB_TEST_OUTPUT}" \
+  --contracts resolved-contracts-20261029T100331Z.csv \
+  --group-id GOLD-manual-test \
+  --stale-after-ms 30000 \
+  --last-view-output /tmp/goldlab-last-view.json
+```
+
+Visual pass condition: event count equals final sequence; all expected futures,
+CE, and PE contracts appear; and `complete` cannot be true while any instrument
+is stale or missing. Repeat the command against unchanged inputs and compare
+the printed configuration, snapshot-stream, and final-view hashes. See the
+[Q003 market-state guide](docs/q003-market-state.md) for the full `jq` proof,
+ordering/freshness rules, failure behavior, and limitations.
 
 ## Live end-to-end test
 
