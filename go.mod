@@ -2,7 +2,10 @@ module yswa-var/dhan_go_bus
 
 go 1.26.4
 
-require github.com/twmb/franz-go v1.22.2
+require (
+	github.com/gorilla/websocket v1.5.3
+	github.com/twmb/franz-go v1.22.2
+)
 
 require (
 	github.com/klauspost/compress v1.20.3 // indirect
