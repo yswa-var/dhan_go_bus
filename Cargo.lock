@@ -513,6 +513,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldlab-market-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "goldlab-recorder"
 version = "0.1.0"
 dependencies = [
@@ -521,6 +532,7 @@ dependencies = [
  "arrow-schema",
  "chrono",
  "clap",
+ "goldlab-market-core",
  "hex",
  "parquet",
  "rdkafka",
@@ -531,6 +543,24 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "goldlab-replay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow-array",
+ "clap",
+ "goldlab-market-core",
+ "goldlab-recorder",
+ "hex",
+ "parquet",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
